@@ -1,4 +1,4 @@
-# hue-cli
+# philips-hue-cli
 
 A basic script to manage information on your Philips Hue hub that works with your Home Assistant configuration.
 
