@@ -3,412 +3,492 @@
 readonly hue_user="" # if you do not want to use information from Home Assistant please enter a registered user from your hub
 readonly hue_url="" # if you do not want to use information from Home Assistant please enter the local ip of your Hue
 
-red=$'\e[1;31m';grn=$'\e[1;32m';yel=$'\e[1;33m';org=$'\e[33;40m';none=$'\e[0m'
-readonly wild='[^\"]*'
-readonly menu_options=("1. Lights" "2. Sensors" "3. Groups" "4. Scenes" "5. Config" "6. Quit" )
+readonly wild='[^\"]*' # Wild card character for searching json
 
-get_value() {
-  if [ -n "$2" ] && [ -n "$3" ]; then
-    result=$(echo "$hue_info" | egrep '\["'$2'","'$3'","'$1'"' | cut -f 2 | tr -d '"')
-  elif [ -n "$2" ]; then
-    result=$(echo "$hue_info" | egrep '\["'$2'","'$hue_number'","'$1'"' | cut -f 2 | tr -d '"')
-  else
-    result=$(echo "$hue_info" | egrep '\["'$hue_type'","'$hue_number'","'$1'"' | cut -f 2 | tr -d '"')
-  fi
-  echo "$result"
+# colors used
+red=$'\e[1;31m';grn=$'\e[32m';yel=$'\e[33m';org=$'\e[38;5;209m';dim=$'\e[38;5;186m';gry=$'\e[38;5;15m';blu=$'\e[38;5;45m';brn=$'\e[38;5;142m';none=$'\e[0m'
+
+# clears input buffer
+function clean_stdin() { while read -r -e -t 0.1; do : ; done; stty echo; }
+
+# shows loading dots
+function show_progress() { while true; do sleep 1; printf "."; done; }
+
+# returns information from hue_info
+function get_item() {
+  return_value=0
+  [[ $1 = "?" ]] && { domain="$wild"; return_value=2; } || domain=$1
+  [[ $2 = "?" ]] && { id="$wild"; return_value=4; } || id=$2
+  [[ $3 = "?" ]] && { state="$wild"; return_value=6; } || state=$3
+  [[ $4 = "?" ]] && return_value=0
+  [[ $return_value == 0 ]] && results=($(echo "$hue_info" | grep -E '\["'$domain'","'$id'","'$state'"' | cut  -f 2 )) || results=($(echo "$hue_info" | grep -E '\["'$domain'","'$id'","'$state'"' | cut -d '"' -f $return_value ))
+  echo "${results[@]}"
 }
 
-get_value_quote() {
-  if [ -n "$2" ] && [ -n "$3" ]; then
-    echo "$hue_info" | egrep '\["'$2'","'$3'","'$1'"' | cut -f 2
-  elif [ -n "$2" ]; then
-    echo "$hue_info" | egrep '\["'$2'","'$hue_number'","'$1'"' | cut -f 2
-  else
-    echo "$hue_info" | egrep '\["'$hue_type'","'$hue_number'","'$1'"' | cut -f 2
-  fi
-}
-
-get_number() {
-  the_attribute="$1"; the_type="$2"; the_number="$3"
-  echo "$hue_info" | egrep '\["'$the_type'","'$the_number'","'$the_attribute'"\]' | cut -d '"' -f 4
-}
-
-hue_menu() {
-  clear
-  printf "$hub_name\n\n"
-  printf "  %s\n" "${menu_options[@]}"
-  read -p $'\n'"Select a menu option: " -n1 start_menu < /dev/tty
-  case $start_menu in
-   1 ) 
-      hue_type="lights"; hue_selector="type"
-      hue_output_list=("count" "name" "number" "type" "manufacturername")
-      hue_output_info_list=("on" "bri" "hue" "sat" "effect" "alert" "colormode" "mode" "reachable")
-      hue_number_list=($(echo "$hue_info" | egrep '\["'$hue_type'","'$wild'","'$hue_selector'"\]' | cut -d '"' -f 4 | sort -g ))
-      show_hue_item
-      break;;
-   2 ) 
-      hue_type="sensors"; hue_selector="type"
-      hue_output_list=("count" "name" "number" "type" "manufacturername")
-      hue_number_list=($(echo "$hue_info" | egrep '\["'$hue_type'","'$wild'","'$hue_selector'"\]' | cut -d '"' -f 4 | sort -g ))
-      show_hue_item
-      break;;
-   3 ) 
-      hue_type="groups"; hue_selector="name"
-      hue_output_list=("count" "name" "number" "lights")
-      hue_number_list=($(echo "$hue_info" | egrep '\["'$hue_type'","'$wild'","'$hue_selector'"\]' | cut -d '"' -f 4 | sort -g ))
-      show_hue_item
-      break;;
-   4 ) 
-      hue_type="scenes"; hue_selector="name"
-      hue_output_list=("count" "name" "areas")
-      hue_number_list=($(echo "$hue_info" | egrep '\["'$hue_type'","'$wild'","'$hue_selector'"\]' | sort -k 2 | cut -d '"' -f 4 )) #tr " " "_" | cut -d '"' -f 8  | sort -u ))
-      echo "${hue_number_list[@]}" > list_test.json
-      show_hue_item
-      break;;
-   5 )
-      hue_type="config"
-      hue_output_list=("name" "zigbeechannel" "mac" "ipaddress")
-      show_config_item
-      break;;
-   6 )
-      echo
-      exit;;
-   * )
-      hue_menu
-  esac
-}
-
-show_config_item() {
-  echo
+# returns values of specific hue items
+function get_item_values() {
+  domain=$1; id=$2; unset info_text
+  states=($(echo "$hue_info" | grep -E '\["'"$domain"'","'"$id"'"' | awk '{print $1}'))
   count=0
-  for hue_config_option in "${hue_output_list[@]}"; do
-    count=$((count+1))
-    value=($(echo "$hue_info" | egrep '\["'$hue_type'","'$hue_config_option'"' | cut -d '"' -f 6))
-    printf "  %d. $hue_config_option [%s]\n" "$count" "$value"
-  done
-  read -p "Press 'enter' to return to the Hue menu: "
-  hue_menu
-}
-
-show_hue_item_info() {
-  clear
-  count=0; number=0
-  hue_number=$(echo "${hue_number_list[$((hue_more_info-1))]}")
-  hue_name=$(get_value "name")
-  printf "Information for %s\n\n" "$hue_name"
-  info=($(echo "$hue_info" | egrep '\["'$hue_type'","'$hue_number'","'$wild'",'))
-  temp_number_list=()
-  while [ $count -lt "${#info[@]}" ]; do
-    info_option=$(echo "${info[$count]}")
-    info_option=$(echo "${info_option##*,}" | tr -d "]" | tr -d '"')
-    count=$((count+1))
-    if [ "${#info_option}" -eq "1" ] && [ "$hue_type" = "groups" ]; then
-      value=$(echo "${info[$count]}" | tr -d '"')
-      if [[ "$value" =~ ^-?[0-9]+$ ]] && [ "$value" -ge 1 ]; then
-        light_names+=($(get_value_quote "name" "lights" "$value"))
-        temp_number_list+=($(echo "${info[$count]}" | tr -d '"'))
-      else
-        printf "  xy: %s\n" "${info[$count]}"
-      fi
-    else
-      info_value=$(echo "${info[$count]}")
-      printf "  %s: %s\n" "$info_option" "${info[$count]}"
+  while [ $count -lt "${#states[@]}" ]; do
+    attrib=$(echo "${states[$count]}" | cut -f 1  | tr -d "]" | awk -F, '{print $NF}' | tr -d '"')
+    value=$(echo "$hue_info" | grep -E '\'${states[$count]%]*} | cut -f 2)
+    if [ -z $3 ]; then
+      info_text+=("$attrib: $value")
+    elif [ $3 = "$attrib" ]; then
+      echo "$value"
     fi
     count=$((count+1))
   done
-  [[ "$hue_type" = "groups" ]] && echo "  lights: ${light_names[@]}"
-  if [ "$hue_type" = "lights" ]; then
-    group_numbers=($(get_number "name" "groups" "$wild"))
-    for hue_group in "${group_numbers[@]}"; do
-      group_lights=($(get_value "lights" "groups" "$hue_group"))
-      for light in "${group_lights[@]}"; do
-        [[ "$light" -eq "$hue_number" ]] && group_names+=($(get_value_quote "name" "groups" "${hue_group}"))
+}
+
+# returns success or failure messages when writing to the hub
+
+show_curl_result() {
+  if [ "$1" = "success" ]; then
+    printf "success\n"
+    show_loading
+  else
+    printf "failed\n"
+    read -p "Press [enter] to return to $item_name information: "
+    show_info
+  fi
+}
+
+# loads information about item_domains from hue
+show_selection() {
+  count=0
+  if [ "$item_domain" = "scenes" ]; then # due to scene management information is handled differently
+    while [ $count -lt "${#hue_numbers[@]}" ]; do
+      item_number="${hue_numbers[$count]}"
+      item_name=$(get_item "$item_domain" "$item_number" "name" | cut -f 2 | tr -d '"')
+      item_lights=($(get_item "$item_domain" "$item_number" "lights"))
+      item_locked=$(get_item "$item_domain" "$item_number" "locked" | cut -f 2 | tr -d '"')
+      count=$((count+1))
+      [[ "$item_locked" = true ]] && printf -v item_name "%s%s%s" "$red" "$item_name" "$none"
+      [[ "${#item_lights[@]}" -eq 1 ]] && item_detail=$(echo "${#item_lights[@]} light") || item_detail=$(echo "${#item_lights[@]} lights")
+      item_text+=("$count. $item_name($gry$item_number$none) [$item_detail]")
+    done
+  else
+    while [ $count -lt "${#hue_numbers[@]}" ]; do
+      item_number="${hue_numbers[$count]}"
+      count=$((count+1))
+      item_name=$(get_item "$item_domain" "$item_number" "name" | tr -d '"')
+      [[ "$item_domain" = "rules" ]] && item_type=$(get_item "$item_domain" "$item_number" "timestriggered" | tr -d '"') || item_type=$(get_item "$item_domain" "$item_number" "type" | tr -d '"')
+      if [[ "$item_domain" = "groups" ]]; then
+        item_lights=($(get_item "$item_domain" "$item_number" "lights"))
+        if [ $(get_item "$item_domain" "$item_number" 'state","all_on' | tr -d '"') = true ]; then
+          printf -v item_name "%s%s%s" "$org" "$item_name" "$none"
+        elif [ $(get_item "$item_domain" "$item_number" 'state","any_on' | tr -d '"') = true ]; then
+          printf -v item_name "%s%s%s" "$yel" "$item_name" "$none"
+        fi    
+        [[ "$item_type" = "Room" ]] && printf -v item_type "%s%s%s" "$dim" "$item_type" "$none"
+        [[ "${#item_lights[@]}" -gt 1 ]] && printf -v item_detail "with %d lights" "${#item_lights[@]}" || printf -v item_detail "with %d light" "${#item_lights[@]}"
+      elif [ "$item_domain" = "rules" ]; then
+        item_detail="times"; item_triggered="$item_type"
+        printf -v item_type "triggered %s" "$item_triggered"
+        item_enabled=$(get_item "$item_domain" "$item_number" "enabled" | tr -d '"')
+        [[ "$item_enabled" = true ]] && printf -v item_name "%s%s%s" "$org" "$item_name" "$none"
+        if [ "$item_triggered" -eq 1 ]; then
+          printf -v item_detail "%stime%s" "$org" "$none"
+          printf -v item_type "%striggered %s%s" "$org" "$item_triggered" "$none"
+        elif [ "$item_triggered" -eq 0 ]; then
+          printf -v item_detail "%stimes%s" "$red" "$none"
+          printf -v item_type "%striggered %s%s" "$red" "$item_triggered" "$none"
+        elif [ "$item_triggered" -lt 5 ]; then
+          printf -v item_detail "%stimes%s" "$yel" "$none"
+          printf -v item_type "%striggered %s%s" "$yel" "$item_triggered" "$none"
+        fi
+      else
+        item_detail=$(get_item "$item_domain" "$item_number" "manufacturername" | tr -d '"')
+        [[ $item_type = "ZGPSwitch" ]] && printf -v item_type "%s%s%s" "$brn" "$item_type" "$none"
+        [[ $item_type = "CLIPGenericStatus" ]] && printf -v item_type "%s%s%s" "$gry" "$item_type" "$none"
+        [[ $item_type = "ZLLLightLevel" ]] || [[ $item_type = "Color temperature light" ]] && printf -v item_type "%s%s%s" "$yel" "$item_type" "$none"
+        [[ $item_type = "ZLLPresence" ]] || [[ $item_type = "Extended color light" ]] || [[ $item_type = "Color light" ]] && printf -v item_type "%s%s%s" "$grn" "$item_type" "$none"
+        [[ $item_type = "ZLLTemperature" ]] && printf -v item_type "%s%s%s" "$blu" "$item_type" "$none"
+        [[ $item_type = "Daylight" ]] || [[ $item_type = "Dimmable light" ]] && printf -v item_type "%s%s%s" "$dim" "$item_type" "$none"
+        [[ "$item_detail" != "Philips" ]] && printf -v item_detail "created by %s%s%s" "$dim" "$item_detail" "$none" || printf -v item_detail "created by %s" "$item_detail"
+      fi
+      [[ $(get_item "$item_domain" "$item_number" 'state","on') = true ]] && printf -v item_name "%s%s%s" "$org" "$item_name" "$none"
+      [[ -z $(get_item "$item_domain" "$item_number" 'state","reachable') ]] && [[ $(get_item "$item_domain" "$item_number" 'state","reachable') = false ]] && item_text+=("$red$count. $item_name(#$item_number) [$item_type $item_detail]$none") || item_text+=("$count. $item_name(#$item_number) [$item_type $item_detail]")
+    done
+  fi
+}
+
+show_info() {
+  stty -echo
+  clear
+  echo "${item_text[$((show_item_option-1))]}"
+  echo
+  printf "   %s\n" "${info_text[@]}"
+  echo
+  if [ "$item_domain" = "groups" ]; then
+    [[ $(get_item "$item_domain" "$item_number" 'state","all_on' | tr -d '"') = true ]] && show_info_input="Press [r] to rename, [d] to delete, [f] to turn all off, [enter] to return to $item_domain menu: " || show_info_input="Press [r] to rename, [d] to delete, [n] to turn all on, [f] to turn all off, [enter] to return to $item_domain menu: "
+  fi
+  [[ "$item_domain" = "lights" ]] && curl -s -X PUT --data '{"alert":"select"}' "$curl_url/$item_domain/$item_number/state" > /dev/null 2>&1
+  [[ "$item_domain" = "groups" ]] && curl -s -X PUT --data '{"alert":"select"}' "$curl_url/$item_domain/$item_number/action" > /dev/null 2>&1
+  show_info_prompt
+}
+
+show_info_prompt() {
+  unset is_viewable; unset item_viewable; unset pid
+  if [ "$item_domain" = "sensors" ]; then
+    [[ -n $(get_item "sensors" "$item_number" "uniqueid") ]] && unique_id=$(get_item "$item_domain" "$item_number" "uniqueid" | cut -d '-' -f 1)
+    if [ -n "$unique_id" ]; then
+      item_viewable=($(echo "$hue_info" | grep -E $unique_id'-.*"$' | cut -d '"' -f 4));
+      show_info_input="Press [r] to rename, press [v] to view hardware, [enter] to return to $item_domain menu: "
+      [[ "${#item_viewable[@]}" -gt 0 ]] && is_viewable=true
+    fi
+  elif [ "$item_domain" = "lights" ]; then
+    for each in "${groups[@]}"; do
+      results=($(get_item "groups" "$each" "lights"))
+      for light in "${results[@]}"; do if [ "$light" = '"'$item_number'"' ]; then
+        item_viewable+=("$each")
+        fi
       done
     done
-    echo "  groups: ${group_names[@]}"
-  fi
-
-  hue_info_prompt=$(echo "Press 'r' to rename, press 'enter' to return to the $hue_type menu: ")
-  [[ "$hue_type" = "lights" ]] && hue_info_prompt=$(echo "Press 'r' to rename, press 't' to toggle light state, press 'v' to view groups, press 'enter' to return to the $hue_type menu: ")
-  [[ "$hue_type" = "groups" ]] && hue_info_prompt=$(echo "Press 'r' to rename, press 'n' to turn all lights on, press 'f' to turn all lights off, press 'd' to delete, press 'v' to view lights, press 'enter' to return to the $hue_type menu: ")
-  echo; read -p "$hue_info_prompt" -n1 hue_info_option
-  if [ "$hue_info_option" = "r" ]; then
-    hue_item_name_change
-  elif [ "$hue_info_option" = "t" ] && [ "$hue_type" = "lights" ]; then
-    hue_item_state_change
-  elif [ "$hue_info_option" = "d" ] && [ "$hue_type" = "groups" ]; then
-    hue_item_delete
-  elif [ "$hue_info_option" = "n" ] && [ "$hue_type" = "groups" ]; then
-    hue_group_on
-  elif [ "$hue_info_option" = "f" ] && [ "$hue_type" = "groups" ]; then
-    hue_group_off
-  elif [ "$hue_info_option" = "v" ]; then
-    if [ "$hue_type" = "lights" ]; then
-      hue_type="groups"; hue_selector="name"
-      hue_output_list=("count" "name" "number" "type" "lights")
-      hue_number_list=($(echo ${temp_number_list[@]}))
-    elif [ "$hue_type" = "groups" ]; then
-      hue_type="lights"; hue_selector="type"
-      hue_output_list=("count" "name" "number" "type" "manufacturername")
-      hue_output_info_list=("on" "bri" "hue" "sat" "effect" "alert" "colormode" "mode" "reachable")
-      hue_number_list=($(echo ${temp_number_list[@]}))
+    [[ "${#item_viewable[@]}" -gt 0 ]] && { is_viewable=true; show_info_input="Press [r] to rename, [t] to toggle power state, [v] to view groups containing light, [enter] to return to $item_domain menu: "; }
+  elif [ "$item_domain" = "scenes" ]; then
+    item_viewable=($(get_item "scenes" "$item_number" "lights" | tr -d '"' ))
+    if [[ "${#item_viewable[@]}" -gt 0 ]]; then
+      is_viewable=true
+      [[ $(get_item "$item_domain" "$item_number" "locked" | cut -f 2 | tr -d '"') = true ]] && show_info_input="Press [r] to rename, [v] to view lights in scene, [enter] to return to $item_domain menu: " || show_info_input="Press [r] to rename, [d] to delete, [v] to view lights in scene, [enter] to return to $item_domain menu: "
     fi
-    show_hue_item
-  elif [ -z "$hue_info_option" ]; then
-    show_hue_item
+  elif [ "$item_domain" = "groups" ]; then
+    item_viewable=($(get_item "groups" "$item_number" "lights" | tr -d '"' ))
+    if [[ "${#item_viewable[@]}" -gt 0 ]]; then
+      is_viewable=true
+      [[ $(get_item "$item_domain" "$item_number" 'state","all_on' | tr -d '"') = true ]] && show_info_input="Press [r] to rename, [d] to delete, [v] to view lights in group, [f] to turn all off, [enter] to return to $item_domain menu: " || show_info_input="Press [r] to rename, [d] to delete, [v] to view lights in group, [n] to turn all on, [f] to turn all off, [enter] to return to $item_domain menu: "
+    fi
+  elif [ "$item_domain" = "rules" ]; then
+    item_viewable=($(get_item "rules" "$item_number" 'actions",0,"body","scene' | tr -d '"'))
+    if [[ "${#item_viewable[@]}" -gt 0 ]]; then
+      is_viewable=true
+      show_info_input="Press [r] to rename, [d] to delete, [v] to view scenes in rule, [enter] to return to $item_domain menu: "
+    fi
+  fi
+  clean_stdin
+  read -p "$show_info_input" show_info_option
+  if [ -z "$show_info_option" ]; then
+    show_items
+  elif [ "$show_info_option" = "q" ]; then
+    exit
+  elif [ "$show_info_option" = "r" ]; then
+    item_rename
+  elif [ "$show_info_option" = "v" ] && [ "$is_viewable" ]; then
+    item_view
+  elif [ "$item_domain" = "lights" ] && [[ "$show_info_option" = "t" ]]; then
+    item_state=$(get_item "$item_domain" "$item_number" 'state","on')
+    [[ "$item_state" = true ]] && { printf "\nTurning off $item_name..."; new_state=false; } || { printf "\nTurning on $item_name..."; new_state=true; }
+    show_progress &
+    pid=$!; disown
+    hue_curl_response=$(curl -s -X PUT --data '{"on":'$new_state'}' "$curl_url/$item_domain/$item_number/state"); hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+    kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
+  elif [ "$item_domain" = "groups" ] && [ "$show_info_option" = "d" ]; then
+    item_delete
+  elif [ "$item_domain" = "scenes" ] && [ "$show_info_option" = "d" ]; then
+    item_delete
+  elif [ "$item_domain" = "groups" ] && [ "$show_info_option" = "n" ]; then
+    printf "\nTurning on all $item_name lights..."
+    show_progress &
+    pid=$!; disown
+    hue_curl_response=$(curl -s -X PUT --data '{"on":true}' "$curl_url/$item_domain/$item_number/action"); hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+    kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
+  elif [ "$item_domain" = "groups" ] && [ "$show_info_option" = "f" ]; then
+    printf "\nTurning off all $item_name lights..."
+    show_progress &
+    pid=$!; disown
+    hue_curl_response=$(curl -s -X PUT --data '{"on":false}' "$curl_url/$item_domain/$item_number/action"); hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+    kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
   else
-    show_hue_item_info
+    show_info_prompt
   fi
 }
 
-hue_group_on() {
-  echo; echo "Turning on all lights in $hue_name group"
-  hue_curl_response=$(curl -s -X PUT --data '{"on": true }' "$curl/groups/$hue_number/action")
-  hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-  [[ "$hue_curl_result" = "success" ]] && echo "Successfully turned on the group $hue_name on the $hub_name" || echo "A problem occured while turning on the group $hue_name on $hub_name"
-  update_hue
-}
-
-hue_group_off() {
-  echo; echo "Turning off all lights in $hue_name group"
-  hue_curl_response=$(curl -s -X PUT --data '{"off": true }' "$curl/groups/$hue_number/action")
-  hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-  [[ "$hue_curl_result" = "success" ]] && echo "Successfully turned off the $hue_name group on the $hub_name" || echo "A problem occured while turning off the $hue_name group on $hub_name"
-  update_hue
-}
-
-
-hue_item_state_change() {
-  if [ $(get_value 'state","on') = true ]; then
-    echo;echo "Turning off $hue_name $hue_type"; change_state=false
+show_item_prompt() {
+  clean_stdin
+  read -p "$show_item_input" show_item_option
+  if [[ $show_item_option =~ ^-?[0-9]+$ ]] && [ $show_item_option -le "${#hue_numbers[@]}" ]; then
+    if [ -z "$info_text" ] || [ "$item_number" != "${hue_numbers[$((show_item_option-1))]}" ]; then
+      unset info_text    
+      item_number=$(echo "${hue_numbers[$((show_item_option-1))]}")
+      item_name=$(get_item "$item_domain" "$item_number" "name")
+      unset pid
+      printf "\nLoading $item_name information from $hub_name"
+      show_progress &
+      pid=$!; disown
+      get_item_values "$item_domain" "$item_number"
+      kill $pid >/dev/null 2>&1
+    fi
+    stty -echo
+    show_info
+  elif [ "$show_item_option" = "c" ] && [ "$item_domain" = "groups" ]; then
+    create_group_name_prompt
+  elif [ "$show_item_option" = "q" ]; then
+    exit
+  elif [ -z "$show_item_option" ]; then
+    show_menu
   else
-    echo;echo "Turning on $hue_name $hue_type"; change_state=true 
-  fi
-  hue_curl_response=$(curl -s -X PUT --data '{"on": '$change_state' }' "$curl/$hue_type/$hue_number/state")
-  hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-  [[ "$hue_curl_result" = "success" ]] && echo "Successfully toggled power of $hue_name on $hub_name" || echo "A problem occured while toggling power of $info_name on $hub_name"
-  update_hue
-}
-
-hue_item_name_change() {
-  echo;echo
-  read -p "Enter new name for $hue_name $hue_type(#$hue_number): " hue_rename
-  read -p "Type 'yes' to rename $hue_name $hue_type to $hue_rename: " hue_rename_confirm
-  echo '{"name":"'"$hue_rename"'"}' "$curl/$hue_type/$hue_number"
-  if [ "$hue_rename_confirm" = "yes" ]; then
-    hue_curl_response=$(curl -s -X PUT --data '{"name":"'$hue_rename'"}' "$curl/$hue_type/$hue_number")
-    hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-    [[ "$hue_curl_result" = "success" ]] && echo "Successfully renamed $hue_name(#$hue_number) to $hue_rename on $hub_name" || echo "A problem occured while renaming $hue_name($hue_number) from $hub_name"
-    update_hue
-  else
-    read -s -r -p "Any name changes will be discarded. Press 'enter' to view '$hue_name' information..."
-    show_hue_item_info
+    show_item_prompt
   fi
 }
 
-hue_item_delete() {
-  echo;echo
-  read -p "Type 'yes' to delete $info_name $hue_type: " hue_delete_confirm
-  if [ "$hue_delete_confirm" = "yes" ]; then
-    hue_curl_response=$(curl -s -X DELETE "$curl/$hue_type/$info_number")
-    hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-    [[ "$hue_curl_result" = "success" ]] && echo "Successfully deleted $info_name(#$info_number) from $hub_name" || echo "A problem occured while deleting $info_name($info_number) from $hub_name"
-    update_hue
-  else
-    read -n 1 -s -e -r -p "No Hue item will be removed. Press 'return' to view '$hue_name' information..."
-    show_hue_item_info
+show_items() {
+  if [ -z "$item_text" ]; then
+    unset pid
+    printf "\nLoading $item_domain from $hub_name"
+    show_progress &
+    pid=$!
+    disown
+    if [ "$item_domain" = "lights" ]; then
+      show_item_input="Enter [1-${#hue_numbers[@]}] to see info, [q] to quit, [enter] to return to menu: "
+      show_info_input="Press [r] to rename, 't' to toggle power state, [enter] to return to $item_domain menu: "
+    elif [ "$item_domain" = "groups" ]; then
+      show_item_input="Enter [1-${#hue_numbers[@]}] to see info, [q] to quit, [c] to create new group, [enter] to return to menu: "
+      show_info_input="Press [r] to rename, [enter] to return to $item_domain menu: "
+    elif [ "$item_domain" = "sensors" ]; then
+      show_item_input="Enter [1-${#hue_numbers[@]}] to see info, [q] to quit, [enter] to return to menu: "
+      show_info_input="Press [r] to rename, [enter] to return to $item_domain menu: "
+    elif [ "$item_domain" = "scenes" ]; then
+      show_item_input="Enter [1-${#hue_numbers[@]}] to see info, [q] to quit, [enter] to return to menu: "
+      show_info_input="Press [r] to rename, [enter] to return to $item_domain menu: "
+      scene_names=($(echo "$hue_info" | grep -E '\["scenes","'$wild'","name"' | cut  -f 2 | sort -u))
+    elif [ "$item_domain" = "rules" ]; then
+      show_item_input="Enter [1-${#hue_numbers[@]}] to see info, [q] to quit, [enter] to return to menu: "
+      show_info_input="Press [r] to rename, [enter] to return to $item_domain menu: "
+    fi
+    show_selection
+    kill $pid >/dev/null 2>&1
+    stty echo
   fi
+  clear
+  echo "$hub_name $item_domain"; echo  
+  printf "   %s\n" "${item_text[@]}"
+  echo
+  show_item_prompt
 }
 
-hue_item_create() {
-  if [[ -z "$hue_create_name" ]]; then
-    while [ -z "$hue_create_name" ]; do
-      echo; read -e -p "Enter a name for the group: " hue_create_name
-    done
-  fi
-  clear; count=0
-  echo "Group name: $hue_create_name"; echo
-  numbers=($(get_number "name" "lights" "$wild")) #echo "$hue_info" | egrep '\["lights","'$wild'","name"' | cut -d '"' -f 4))
-  while [ $count -lt ${#numbers[@]} ]; do
-    hue_number=${numbers[$count]}
-    name=$(get_value "name" "lights") #echo "$hue_info" | egrep '\["lights","'${numbers[$count]}'","name"' | cut -f2 | tr -d '"')
-    number=${numbers[$count]}
-    [[ $selected = *'"'${numbers[$count]}'" '* ]] && color="$yel" || color="$none"
-    count=$((count+1))
-    printf "  %d. %s%s%s(#%d)\n" "$count" "$color" "$name" "$none" "$number"
+function create_group_setup() {
+  item_selected=()
+  for each in ${lights[@]}; do
+    item_selected+=(false)
   done
-  echo; echo "lights: ${selected[@]}"; echo
-  read -p "Select lights to add to your group, press 's' to save group, press 'q' to quit making group, press 'r' to rename group: " -n2 create_lights < /dev/tty
-  if [ ! -z "${create_lights##*[!0-9]*}" ]; then
-    if [ "$create_lights" -le "${#numbers[@]}" ]; then
-      temp=$(echo '"'${numbers[$create_lights-1]}'" ')
-      [[ $selected = *"$temp"* ]] && selected="${selected/$temp/}" || selected=$(echo "$selected$temp")
-    fi
-    hue_item_create
-  elif [ "$create_lights" = "s" ]; then
-    echo
-    data=($(echo "$selected"))
-    save=$(echo "${data[@]}")
-    printf "  name: %s\n" "$hue_create_name"
-    printf "  lights: %s\n" "$save"
-    printf "  type: LightGroup\n\n"
-    read -p "Type 'yes' to save $hue_create_name to $hue_type on $hub_name: " hue_create_confirm
-    if [ "$hue_create_confirm" = "yes" ]; then
-      echo
-      hue_curl_response=$(curl -s -X POST --data '{"name":"'"$hue_create_name"'","lights":'"$save"',"type":"LightGroup"}' "$curl/groups")
-      hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
-      hue_curl_number=$(echo "$hue_curl_response" | cut -d '"' -f 6)
-      [[ "$hue_curl_result" = "success" ]] && echo "Successfully added group $hue_create_name(#$hue_curl_number) to $hub_name" || echo "A problem occured while saving to $hub_name"
-      update_hue
-    else
-      hue_item_create
-    fi
-  elif [ "$create_lights" = "r" ]; then
-    unset $hue_create_name
-    hue_item_create
-  elif [ "$create_lights" = "q" ]; then
-    read -p -e "Press 'y' to abandon creating $hue_create_name group: " -n1 hue_create_cancel
-    [[ $hue_create_cancel = "y" ]] && show_hue_item_info || hue_item_create
-  else
-    hue_item_create
-  fi
+  item_selected[2]=true
+  create_group
 }
 
-show_hue_item() {
-  clear  
-  printf "%s has %d %s\n\n" "$hub_name" "${#hue_number_list[@]}" "$hue_type"
+function create_group() {
+  clear
   count=0
-  if [ "$hue_type" = "scenes" ]; then
-    while [ $count -lt "${#hue_number_list[@]}" ]; do
-      hue_number=${hue_number_list[$count]}
-      name=$(get_value "name")
-      lights=($(get_value "lights")) #echo "$hue_info" | egrep '\["'$hue_type'","'${hue_number_list[$count]}'","lights"' | cut -d '"' -f 8))
-      printf -v temp '"%s",' "${lights[@]}"
-      lights="${temp:0:-1}"
-      echo "  $((count+1)). $name (${hue_number_list[$count]}) [$lights]"
-      count=$((count+1))
-    done
-  else
-  for hue_number in "${hue_number_list[@]}"; do
+  echo "Add lights to '"${create_group_name}"' LightGroup: "; echo
+  for each in ${lights[@]}; do
+    temp_name=$(get_item "lights" "$each" "name" | tr -d '"')
+    [[ "${item_selected[$count]}" = false ]] && printf "  %d. %s(#%d)\n" "$((count+1))" "$temp_name" "$each" || printf "  %d. %s%s(#%d)%s\n" "$((count+1))" "$org" "$temp_name" "$each" "$none"
     count=$((count+1))
-    printf "  "
-    type_color=${none}; count_color=${none}
-    for hue_output_option in "${hue_output_list[@]}"; do
-      case "$hue_output_option" in
-        lights )
-            value=($(get_value "lights"))
-            text_color=${none}
-            if [ "$hue_type" = "groups" ]; then
-              type=$(get_value "type")
-              printf "[$type with "
-            else
-              printf "["
-            fi
-            [[ "${#value[@]}" -gt 1 ]] && printf "%s%d%s lights]" "$text_color" "${#value[@]}" "${none}" || printf "%s%d%s light]" "$text_color" "${#value[@]}" "${none}";;
-        areas )
-            hue_number=$(echo "$hue_number" | tr "_" " " )
-            printf -v hue_number "\"%s\"" "$hue_number"
-            value=($(echo "$hue_info" | egrep '\["'$hue_type'","'$wild'","name"\]' | grep "$hue_number"))
-            printf "[%d lights]" "${#value[@]}";;
-        count )
-            printf "%d. " "$count"
-            ;;
-        name )
-            [[ "$hue_type" = "scenes" ]] && value=$( echo "$hue_number" | tr '_' ' ' | tr -d '"') || value=$(echo "$hue_info" | egrep '\["'$hue_type'","'$hue_number'","'$hue_output_option'"\]' | cut -d '"' -f 8)
-            if [ "$hue_type" = "lights" ]; then
-              count_color=${none}
-              [[ $(get_value "reachable") = false ]] && count_color=${red}
-              [[ $(get_value 'state","on') = true ]] && count_color=${yel}
-            fi
-            printf "%s%s%s" "$count_color" "$value" "$none"
-            ;;
-        number )
-            printf "(#%s) " "$hue_number"
-            ;;
-        manufacturername )
-            value=$(get_value "$hue_output_option")
-            printf "created by %s" "$value"
-            ;;
-        type )
-            if [ "$hue_type" = "lights" ]; then
-              value=$(get_value "type")
-              [[ "$value" = "Extended color light" ]] || [[ "$value" = "Color light" ]] && type_color=${grn}
-              [[ "$value" = "Color temperature light" ]] && type_color=${org}
-              printf "[%s%s%s] " "${type_color}" "${value}" "${none}"
-            fi
-            ;;
-        * )
-            echo
-            echo "$hue_output_option"
-            ;;
-      esac
-    done
-    echo
   done
-  fi
   echo
-  hue_info_prompt="Enter a number to see more information, press 'enter' to return to the Hue menu: "
-  [[ "groups" = "$hue_type" ]] && hue_info_prompt="Enter a number to see more information, press 'c' to create a new group, press 'enter' to return to the Hue menu: "
-  while true
-  do
-    [[ $count -le "10" ]] && read -e -p "$hue_info_prompt" -n1 hue_more_info || read -e -p "$hue_info_prompt" -n2 hue_more_info
-    if [[ $hue_more_info =~ ^-?[0-9]+$ ]] && [ $hue_more_info -le $count ]; then
-      show_hue_item_info
-      break
-    elif [ "$hue_more_info" = "c" ] && [ "$hue_type" = "groups" ]; then
-      hue_item_create
-      break
-    elif [ -z $hue_more_info ]; then
-      hue_menu
-      break
+  create_group_prompt
+}
+
+function create_group_name_prompt() {
+  read -p "Enter new group name: " create_group_name
+  [[ -n "$create_group_name" ]] && read -p "Please retype the group name [${create_group_name}] to confirm: " create_group_name_confirm || create_group_name_prompt
+  [[ "$create_group_name" = "$create_group_name_confirm" ]] && create_group_setup || create_group_name_prompt
+}
+
+function create_group_prompt() {
+  read -p "Enter [1-${#lights[@]}] to add/remove lights, press [s] to save, press [c] to cancel: " create_group_option
+  if [ ! -z "${create_group_option##*[!0-9]*}" ]; then
+    if [ "$create_group_option" -le "${#lights[@]}" ]; then
+      [[ "${item_selected[$((create_group_option-1))]}" = false ]] && item_selected[$((create_group_option-1))]=true || item_selected[$((create_group_option-1))]=false
     fi
-  done
+    create_group
+  elif [ "$create_group_option" = s ]; then
+    echo
+    item_name=$(get_item "$item_domain" "$item_number" "name" | tr -d '"' )
+    clean_stdin
+    item_save=()
+    for each in "${!item_selected[@]}"; do
+      [[ "${item_selected[$each]}" = true ]] && item_save+=('"'${lights[$each]}'"')
+    done
+    printf -v item_save "%s," "${item_save[@]}"
+    data=$(echo '{"lights": ['${item_save::-1}'],"name": "'$create_group_name'","type": "LightGroup"}')
+    read -p "Type [yes] to save LightGroup '$create_group_name' with lights ${item_save::-1} to $hub_name: " item_save_confirm
+    if [ "$item_save_confirm" = "yes" ]; then
+      unset pid; printf "\nSaving $create_group_name to $hub_name..."
+      show_progress &
+      pid=$!; disown
+      hue_curl_response=$(curl -s -X POST --data "$data" "$curl_url/groups")
+      hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+      kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
+    else
+      read -p "Changes will be discarded, press [enter] to return to main menu: "
+      show_info
+    fi
+  elif [ "$create_group_option" = c ]; then
+    echo "Cancel"
+    exit
+  else
+    create_group_prompt  
+  fi
 }
 
 
-######## Startup script, do not edit
-
-update_hue() {
-  hue_info=""
+item_rename() {
   echo
-  curl -s -X GET $curl | "/bin/bash" "$LOCATION/JSON.sh" -s -b > /tmp/_out &
-  pid=$!
+  item_name=$(get_item "$item_domain" "$item_number" "name" | tr -d '"' )
+  clean_stdin
+  read -p "Enter new name for '$item_name': " item_name_new
+  read -p "Type [yes] to rename '$item_name' to '$item_name_new': " item_name_confirm
+  if [ "$item_name_confirm" = "yes" ]; then
+    unset pid; printf "\nRenaming $item_name to $item_name_new..."
+    show_progress &
+    pid=$!; disown
+    hue_curl_response=$(curl -s -X PUT --data '{"name":"'"$item_name_new"'"}' "$curl_url/$item_domain/$item_number")
+    hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+    kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
+  else
+    echo 
+    read -s -r -p "Changes will be discarded, press [enter] to return to '$item_name' information: "
+    show_info
+  fi
+}
+
+item_delete() {
+  echo
+  item_name=$(get_item "$item_domain" "$item_number" "name" | tr -d '"' )
+  clean_stdin
+  read -p "Type [yes] to delete '$item_name': " item_delete_confirm
+  if [ "$item_delete_confirm" = "yes" ]; then
+    unset pid; printf "\nDeleting $item_name from $hub_name..."
+    show_progress &
+    pid=$!; disown
+    hue_curl_response=$(curl -s -X DELETE "$curl_url/$item_domain/$item_number")
+    hue_curl_result=$(echo "$hue_curl_response" | cut -d '"' -f 2)
+    kill $pid >/dev/null 2>&1; show_curl_result "$hue_curl_result"
+  else
+    read -p "Changes will be discarded, press [enter] to return to '$item_name' information: "
+    show_info
+  fi
+}
+
+item_view() {
+  hue_numbers=("${item_viewable[@]}")
+  unset item_text
+  if [ "$item_domain" = "lights" ]; then
+    item_domain="groups"
+  elif [ "$item_domain" = "groups" ] || [ "$item_domain" = "scenes" ]; then
+    item_domain="lights"
+  elif [ "$item_domain" = "rules" ]; then
+    item_domain="scenes"
+  fi
+  show_items
+}
+
+show_menu_prompt() {
+  clean_stdin
+  read -p "Enter [1-5] to see Hue items, press [q] to quit: " show_menu_option 
+  if [ "$show_menu_option" = "1" ]; then
+    [[ "$item_domain" != "lights" ]] || [[ "${#lights[@]}" != "${#hue_numbers[@]}" ]] && unset item_text
+    item_domain="lights"
+    hue_numbers=("${lights[@]}")
+  elif [ "$show_menu_option" = "2" ]; then
+    [[ "$item_domain" != "groups" ]] || [[ "${#groups[@]}" != "${#hue_numbers[@]}" ]] && unset item_text
+    item_domain="groups"
+    hue_numbers=("${groups[@]}")
+  elif [ "$show_menu_option" = "3" ]; then
+    [[ "$item_domain" != "sensors" ]] || [[ "${#sensors[@]}" != "${#hue_numbers[@]}" ]] && unset item_text
+    item_domain="sensors"
+    hue_numbers=("${sensors[@]}")
+  elif [ "$show_menu_option" = "4" ]; then
+    [[ "$item_domain" != "scenes" ]] || [[ "${#scenes[@]}" != "${#hue_numbers[@]}" ]] && unset item_text
+    item_domain="scenes"
+    hue_numbers=("${scenes[@]}")
+  elif [ "$show_menu_option" = "5" ]; then
+    [[ "$item_domain" != "rules" ]] || [[ "${#rules[@]}" != "${#hue_numbers[@]}" ]] && unset item_text
+    item_domain="rules"
+    hue_numbers=("${rules[@]}")
+  elif [ "$show_menu_option" = "q" ]; then
+    exit
+  else
+    echo
+    show_menu_prompt
+  fi
+  stty -echo
+  show_items
+}
+
+
+show_menu() {
+  clear
+  printf "%s Information\n\n" "$hub_name"
+  echo "   1. Lights"
+  echo "   2. Groups"
+  echo "   3. Sensors"
+  echo "   4. Scenes"
+  echo "   5. Rules"
+  echo "   q. Quit"
+  echo
+  show_menu_prompt
+}
+
+show_loading() {
+  stty -echo
+  unset info_text; unset item_text
+  echo
   printf "Updating Hue information"
-  while [ -e /proc/$pid ]; do
-    sleep 1
-    printf "."
-  done
+  unset pid
+  show_progress &
+  pid=$!
+  disown
+#   url=$(cat /config/phue.conf | cut -d'"' -f2); user=$(cat /config/phue.conf | cut -d'"' -f6)
+  curl_url=$(echo "http://$url/api/$user")
+  curl -s -X GET $curl_url | "/bin/bash" "$(pwd)/JSON.sh" -s -b > /tmp/_out
   hue_info=$(</tmp/_out)
-  hub_name=$(echo "$hue_info"| egrep '\["config","name"\]' | cut -d '"' -f6 )
-  hue_menu
+  kill $pid >/dev/null
+  hub_name=$(echo "$hue_info"| grep -E '\["config","name"\]' | cut -d '"' -f6 )
+  lights=($(get_item "lights" "?" "name"))
+  sensors=($(get_item "sensors" "?" "name"))
+  groups=($(get_item "groups" "?" "name"))
+  scenes=($(get_item "scenes" "?" "name"))
+  rules=($(get_item "rules" "?" "name"))
+  echo
+  show_menu
 }
 
 # Verify location of configuration.yaml and phue.conf
-LOCATION=$(pwd)
-if [ ! -f $LOCATION/phue.conf ]; then
-  LOCATION=$(find / -name configuration.yaml -exec dirname {} \;)
-  if [ -z $LOCATION ]; then
-    echo "Unable to location Home Assistant directory, please run script from your Home Assistant directory."
-    exit 1
-  fi
-  if [ ! -f $LOCATION/phue.conf ]; then
-    echo "Unable to locate phue.conf, please ensure Philips Hue has been configured in Home Assistant."
-    exit 1
-  fi
-fi
+location=$(pwd)
 
 # Ensure JSON.sh is available, download if it is not
-if [ ! -f $LOCATION/JSON.sh ]; then
-  curl -k -s "https://raw.githubusercontent.com/dominictarr/JSON.sh/master/JSON.sh" > $LOCATION/JSON.sh
-  read -n 1 -s -r -p "Downloading JSON.sh to $LOCATION...press any key to continue."
-  chmod +x $LOCATION/JSON.sh
+if [ ! -f "$(pwd)/JSON.sh" ]; then
+  curl -k -s "https://raw.githubusercontent.com/dominictarr/JSON.sh/master/JSON.sh" > "$(pwd)/JSON.sh"
+  read -n 1 -s -r -p "Downloading JSON.sh to $(pwd)...press any key to continue."
+  if [ ! -f "$(pwd)/JSON.sh" ]; then
+    echo "Unable to download JSON.sh to $(pwd)."
+    exit 2
+  else
+    chmod +x "$(pwd)/JSON.sh"
+  fi
 fi
 
-[[ -n "$hue_url" ]] && echo "hue_url"
-[[ -n "$hue_url" ]] && URL=${hue_url} || URL=$(cat $LOCATION/phue.conf | cut -d'"' -f2);
-[[ -n "$hue_user" ]] && USER=${hue_user} || USER=$(cat "${LOCATION}"/phue.conf | cut -d'"' -f6)
+if [ -n "$hue_url" ] && [ -n "$hue_user" ]; then
+  url=${hue_url}; user=${hue_user}
+elif [ ! -f $location/phue.conf ]; then
+  location=$(find / -name configuration.yaml -exec dirname {} \;)
+  if [ -z $location ]; then
+    echo "Unable to location Home Assistant directory, please run script from your Home Assistant directory or enter your Hue information and run again."
+    exit 1
+  fi
+  if [ ! -f $location/phue.conf ]; then
+    echo "Unable to locate phue.conf, please ensure Philips Hue has been configured in Home Assistant or enter your Hue information and run again."
+    exit 1
+  fi
+  url=$(cat "$location/phue.conf" | cut -d'"' -f2);
+  user=$(cat "$location/phue.conf" | cut -d'"' -f6)
+fi
+
+[[ -z "$user" ]] || [[ -z "$url" ]] && { echo "Unable to access Hue with information available. Please check settings and run again."; exit 3; }
 
 
-curl=$(echo "http://$URL/api/$USER")
-
-update_hue
+stty -echo
+show_loading
